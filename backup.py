@@ -36,9 +36,9 @@ class ExcludeMatcher:
       Glob metacharacters are supported. In path patterns, glob
       metacharacters never match the path separator ``/``.
 
-    - ``marker :: target``:
-      Match ``target`` only when its parent directory contains an entry
-      named ``marker``. The marker must be an exact basename.
+    - ``marker [+ marker ...] :: target``:
+      Match ``target`` only when its parent directory contains entries for
+      all specified markers. Each marker must be an exact basename.
 
     Path patterns always use ``/`` as the separator, regardless of the
     operating system.
@@ -49,22 +49,23 @@ class ExcludeMatcher:
     Exclusions are monotonic: once a directory is excluded, none of its
     descendants can be included again.
     """
+
     patterns: frozenset[str]
     source: Path
 
-    exact_files: tuple[tuple[str, str | None], ...]
-    exact_dirs: tuple[tuple[str, str | None], ...]
-    glob_files: tuple[tuple[str, str | None], ...]
-    glob_dirs: tuple[tuple[str, str | None], ...]
+    exact_files: tuple[tuple[str, tuple[str, ...]], ...]
+    exact_dirs: tuple[tuple[str, tuple[str, ...]], ...]
+    glob_files: tuple[tuple[str, tuple[str, ...]], ...]
+    glob_dirs: tuple[tuple[str, tuple[str, ...]], ...]
 
-    exact_file_paths: tuple[tuple[str, str | None], ...]
-    exact_dir_paths: tuple[tuple[str, str | None], ...]
+    exact_file_paths: tuple[tuple[str, tuple[str, ...]], ...]
+    exact_dir_paths: tuple[tuple[str, tuple[str, ...]], ...]
     glob_file_paths: tuple[
-        tuple[tuple[re.Pattern[str], ...], str | None],
+        tuple[tuple[re.Pattern[str], ...], tuple[str, ...]],
         ...,
     ]
     glob_dir_paths: tuple[
-        tuple[tuple[re.Pattern[str], ...], str | None],
+        tuple[tuple[re.Pattern[str], ...], tuple[str, ...]],
         ...,
     ]
 
@@ -79,15 +80,15 @@ class ExcludeMatcher:
         self.patterns = frozenset(patterns)
         self.source = source
 
-        exact_files: list[tuple[str, str | None]] = []
-        exact_dirs: list[tuple[str, str | None]] = []
-        glob_files: list[tuple[str, str | None]] = []
-        glob_dirs: list[tuple[str, str | None]] = []
+        exact_files: list[tuple[str, tuple[str, ...]]] = []
+        exact_dirs: list[tuple[str, tuple[str, ...]]] = []
+        glob_files: list[tuple[str, tuple[str, ...]]] = []
+        glob_dirs: list[tuple[str, tuple[str, ...]]] = []
 
-        exact_file_paths: list[tuple[str, str | None]] = []
-        exact_dir_paths: list[tuple[str, str | None]] = []
-        glob_file_paths: list[tuple[tuple[re.Pattern[str], ...], str | None]] = []
-        glob_dir_paths: list[tuple[tuple[re.Pattern[str], ...], str | None]] = []
+        exact_file_paths: list[tuple[str, tuple[str, ...]]] = []
+        exact_dir_paths: list[tuple[str, tuple[str, ...]]] = []
+        glob_file_paths: list[tuple[tuple[re.Pattern[str], ...], tuple[str, ...]]] = []
+        glob_dir_paths: list[tuple[tuple[re.Pattern[str], ...], tuple[str, ...]]] = []
 
         for raw_pattern in sorted(patterns):
             marker, raw_target = self._parse_marker_pattern(raw_pattern)
@@ -176,7 +177,7 @@ class ExcludeMatcher:
         self,
         candidate: str,
         relative: Path,
-        patterns: tuple[tuple[str, str | None], ...],
+        patterns: tuple[tuple[str, tuple[str, ...]], ...],
     ) -> bool:
         return any(
             candidate == pattern and self._matches_marker(relative, marker)
@@ -187,7 +188,7 @@ class ExcludeMatcher:
         self,
         candidate: str,
         relative: Path,
-        patterns: tuple[tuple[str, str | None], ...],
+        patterns: tuple[tuple[str, tuple[str, ...]], ...],
     ) -> bool:
         return any(
             fnmatch.fnmatchcase(candidate, pattern)
@@ -195,15 +196,12 @@ class ExcludeMatcher:
             for pattern, marker in patterns
         )
 
-    def _matches_marker(self, relative: Path, marker: str | None) -> bool:
-        return marker is None or (self.source / relative.parent / marker).exists()
-
     def _matches_path_glob(
         self,
         relative: str,
         relative_path: Path,
         patterns: tuple[
-            tuple[tuple[re.Pattern[str], ...], str | None],
+            tuple[tuple[re.Pattern[str], ...], tuple[str, ...]],
             ...,
         ],
     ) -> bool:
@@ -218,6 +216,10 @@ class ExcludeMatcher:
             and self._matches_marker(relative_path, marker)
             for pattern, marker in patterns
         )
+
+    def _matches_marker(self, relative: Path, markers: tuple[str, ...]) -> bool:
+        parent = self.source / relative.parent
+        return all((parent / marker).exists() for marker in markers)
 
     @staticmethod
     def _normalize_candidate(
@@ -281,30 +283,32 @@ class ExcludeMatcher:
         return pattern, is_dir, is_path, is_glob
 
     @classmethod
-    def _parse_marker_pattern(cls, raw_pattern: str) -> tuple[str | None, str]:
+    def _parse_marker_pattern(cls, raw_pattern: str) -> tuple[tuple[str, ...], str]:
         if "::" not in raw_pattern:
-            return None, raw_pattern
+            return (), raw_pattern
 
         parts = raw_pattern.split("::")
 
         if len(parts) != 2:
             raise ValueError(f"Invalid marker exclusion pattern: {raw_pattern!r}")
 
-        marker, target = (part.strip() for part in parts)
+        raw_markers, target = (part.strip() for part in parts)
+        markers = tuple(marker.strip() for marker in raw_markers.split("+"))
 
-        if (
-            not marker
-            or marker in (".", "..")
-            or "/" in marker
-            or "\\" in marker
-            or cls._has_glob(marker)
-        ):
-            raise ValueError(f"Marker must be an exact basename: {marker!r}")
+        for marker in markers:
+            if (
+                not marker
+                or marker in (".", "..")
+                or "/" in marker
+                or "\\" in marker
+                or cls._has_glob(marker)
+            ):
+                raise ValueError(f"Marker must be an exact basename: {marker!r}")
 
         if not target:
             raise ValueError(f"Marker target must not be empty: {raw_pattern!r}")
 
-        return marker, target
+        return markers, target
 
     @staticmethod
     def _has_glob(pattern: str) -> bool:
