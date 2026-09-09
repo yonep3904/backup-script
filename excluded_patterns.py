@@ -5,23 +5,33 @@
 #   Exclude only files/directories that can be reproduced from source files,
 #   dependency definitions, or build processes.
 #
+#   Generic output names are excluded only when nearby marker files identify
+#   a project/tool context that makes the output reproducible. All markers in
+#   a marker expression must exist in the target's parent directory.
+#
 #   Do NOT exclude things merely because they are commonly listed in
 #   .gitignore. For example, .env may contain non-reproducible information
 #   and therefore should be backed up.
 #
 # Syntax:
-#   "name/"   matches a directory basename anywhere in the source tree.
-#   "name"    matches a file basename anywhere in the source tree.
+#   "name/" matches a directory basename anywhere in the source tree.
+#   "name"  matches a file basename anywhere in the source tree.
 #   Patterns containing "/" match a path relative to the source directory.
-#   Glob metacharacters (*, ?, [...]) are supported.
+#   Glob metacharacters (*, ?, [...]) are supported; ** is not supported.
+#
+#   "marker :: target" matches target only when marker exists in target's
+#   parent directory. Multiple required markers are joined with "+". Markers
+#   must be exact basenames; paths and glob metacharacters are not allowed.
 #
 # Examples:
-#   "node_modules/"  excludes directories named "node_modules".
-#   ".yarn/cache/"    excludes the directory at that relative path.
-#   "*.pyc"          excludes files ending in ".pyc".
-#   "CMakeCache.txt" excludes files named "CMakeCache.txt".
+#   "node_modules/" excludes directories named "node_modules".
+#   ".yarn/cache/" excludes the directory at that relative path.
+#   "*.pyc" excludes files ending in ".pyc".
+#   "Cargo.toml :: target/" excludes a Cargo target directory.
+#   "pyproject.toml + uv.lock :: .venv/" requires both marker files.
 #
-# Path separators in patterns must be written as "/" on every platform.
+# Path separators in targets must be written as "/" on every platform.
+# Leading "/", empty components, ".", "..", and backslashes are invalid.
 # ---------------------------------------------------------------------------
 
 
@@ -40,7 +50,6 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # Common / editors / OS
     # -----------------------------------------------------------------------
-
     # Caches are often reproducible, but ".cache" is generic and applications
     # may store valuable state there.
     # ".cache/",
@@ -52,10 +61,8 @@ EXCLUDED_PATTERNS = {
     # OS metadata is usually disposable, but keeping it is safer for a backup.
     # ".DS_Store",
     # "Thumbs.db",
-
-    # These names are too generic to exclude globally. They are frequently
-    # used for generated output, but may also contain source or other
-    # non-reproducible data.
+    # These names are too generic to exclude unconditionally. Tool-specific
+    # marker rules are used below where the surrounding context is reliable.
     # "bin/",
     # "build/",
     # "dist/",
@@ -70,7 +77,6 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # C / C++
     # -----------------------------------------------------------------------
-
     # CMake in-source/generated metadata.
     "CMakeFiles/",
     "CMakeCache.txt",
@@ -83,11 +89,11 @@ EXCLUDED_PATTERNS = {
     # "compile_commands.json",
 
     # CMake/Ninja build directories are commonly named "build", "cmake-build-*",
-    # or "out". Only the tool-specific name is reasonably safe by default.
+    # or "out". Generic names require a CMake project marker in the same
+    # directory; the tool-specific name is safe without one.
     "cmake-build-*/",
-    # "build/",
-    # "out/",
-
+    "CMakeLists.txt :: build/",
+    "CMakeLists.txt :: out/",
     # Ninja.
     ".ninja_deps",
     ".ninja_log",
@@ -97,9 +103,8 @@ EXCLUDED_PATTERNS = {
     "meson-private/",
     "meson-logs/",
     "meson-info/",
-    # "meson-out/",
-    # "build/",
-
+    "meson.build :: meson-out/",
+    "meson.build :: build/",
     # Autotools.
     "autom4te.cache/",
     # "configure",       # Often generated, but commonly distributed as source.
@@ -132,11 +137,9 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # Rust / Cargo
     # -----------------------------------------------------------------------
-
-    # Cargo's default build directory. "target" is also a fairly generic name,
-    # so preserve it by default in a conservative backup policy.
-    # "target/",
-
+    # Cargo's default build directory. The marker avoids excluding unrelated
+    # directories that happen to use the generic name "target".
+    "Cargo.toml :: target/",
     # Cargo configuration and lockfiles are intentionally preserved.
     # "Cargo.lock",
     # ".cargo/",
@@ -149,7 +152,6 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # JavaScript / TypeScript / Node.js
     # -----------------------------------------------------------------------
-
     "node_modules/",
 
     # Framework/build caches and generated framework state.
@@ -168,9 +170,8 @@ EXCLUDED_PATTERNS = {
     ".yarn/unplugged/",
     ".yarn/build-state.yml",
     ".yarn/install-state.gz",
-
-    # Common build output names are intentionally preserved because they are
-    # too generic.
+    # Common build output names remain preserved. package.json alone does not
+    # guarantee that these directories are generated or fully reproducible.
     # "dist/",
     # "build/",
     # "out/",
@@ -197,7 +198,6 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # Cloudflare Workers
     # -----------------------------------------------------------------------
-
     # Local runtime/emulator state may contain non-reproducible data
     # (KV/D1/R2/etc.), so preserve it.
     # ".wrangler/",
@@ -210,7 +210,6 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # Python / uv
     # -----------------------------------------------------------------------
-
     "__pycache__/",
     "*.pyc",
     "*.pyo",
@@ -220,22 +219,18 @@ EXCLUDED_PATTERNS = {
     ".ruff_cache/",
     ".pytype/",
     ".hypothesis/",
-
-    # Virtual environments are reproducible only when the project's complete
-    # dependency/environment definition is available. They can also contain
-    # manually installed packages, so preserve them under a strict backup
-    # policy.
-    # ".venv/",
+    # A uv-managed virtual environment is reproducible when both its project
+    # definition and lockfile are present. Other virtual environments may
+    # contain manually installed packages and remain preserved.
+    "pyproject.toml + uv.lock :: .venv/",
     # "venv/",
     # "env/",
 
     # uv's cache is reproducible, but normally lives outside the project.
     # ".uv-cache/",
-
-    # Python packaging output uses generic directory names.
-    # "build/",
-    # "dist/",
-
+    # Python packaging output uses generic names, so require project metadata.
+    "pyproject.toml :: build/",
+    "pyproject.toml :: dist/",
     # Egg metadata is generated by packaging tools.
     "*.egg-info/",
     ".eggs/",
@@ -255,7 +250,6 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # LaTeX
     # -----------------------------------------------------------------------
-
     # Common auxiliary files generated during compilation.
     "*.aux",
     "*.bcf",
@@ -286,7 +280,6 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # Typst
     # -----------------------------------------------------------------------
-
     # Typst generally does not create large project-local intermediate build
     # trees. Keep final output by default because exact reproducibility may
     # depend on fonts, Typst version, packages, external resources, etc.
@@ -297,26 +290,23 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # Java / Kotlin
     # -----------------------------------------------------------------------
-
     # Maven.
-    # "target/",  # Generic name; normally safe for Maven, unsafe globally.
-
+    "pom.xml :: target/",
     # Gradle.
     ".gradle/",
-    # "build/",   # Generic.
-
+    "build.gradle :: build/",
+    "build.gradle.kts :: build/",
     # IDE/project metadata is configuration/state rather than build output.
     # ".idea/",
 
     # -----------------------------------------------------------------------
     # Go
     # -----------------------------------------------------------------------
-
-    # Go normally keeps caches outside the source tree. Do not globally
-    # exclude "bin" or "vendor": both names may contain valuable data.
+    # Go normally keeps caches outside the source tree. A vendored dependency
+    # tree is reproducible from go.mod/go.sum; "bin" remains preserved because
+    # local build output conventions vary.
     # "bin/",
-    # "vendor/",
-
+    "go.mod + go.sum :: vendor/",
     # go.sum/go.mod are essential reproducibility inputs.
     # "go.mod",
     # "go.sum",
@@ -324,7 +314,6 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # .NET / C#
     # -----------------------------------------------------------------------
-
     # These are conventional build directories, but their names are generic
     # enough to preserve under a conservative global policy.
     # "bin/",
@@ -333,7 +322,6 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # Ruby
     # -----------------------------------------------------------------------
-
     # Bundler-installed dependencies can be large and reproducible, but
     # "vendor" is too generic for basename-only global exclusion.
     # "vendor/",
@@ -341,15 +329,13 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # PHP / Composer
     # -----------------------------------------------------------------------
-
-    # Composer dependencies are normally reproducible from composer.lock,
-    # but "vendor" is too generic for basename-only global exclusion.
-    # "vendor/",
+    # Composer dependencies are reproducible when both the manifest and lock
+    # file are present beside the conventional dependency directory.
+    "composer.json + composer.lock :: vendor/",
 
     # -----------------------------------------------------------------------
     # Generated archives / backup outputs
     # -----------------------------------------------------------------------
-
     # Never exclude archives globally. They may themselves be important
     # source assets, releases, datasets, or previous backups.
     # "*.zip",
@@ -361,7 +347,6 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # Databases / application state
     # -----------------------------------------------------------------------
-
     # Never exclude databases merely because they are commonly generated.
     # They are frequently the most important non-reproducible data.
     # "*.db",
@@ -371,7 +356,6 @@ EXCLUDED_PATTERNS = {
     # -----------------------------------------------------------------------
     # Secrets / credentials / local configuration
     # -----------------------------------------------------------------------
-
     # These are often ignored by VCS precisely because they contain local,
     # secret, or machine-specific information. That makes them MORE important
     # to a backup, not less.

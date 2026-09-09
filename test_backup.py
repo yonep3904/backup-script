@@ -13,6 +13,7 @@ package = types.ModuleType(PACKAGE_NAME)
 package.__path__ = [str(Path(__file__).parent)]
 sys.modules.setdefault(PACKAGE_NAME, package)
 backup = importlib.import_module(f"{PACKAGE_NAME}.backup")
+excluded_patterns = importlib.import_module(f"{PACKAGE_NAME}.excluded_patterns")
 
 ExcludeMatcher = backup.ExcludeMatcher
 
@@ -159,6 +160,20 @@ class ExcludeMatcherTest(unittest.TestCase):
 
         self.assertEqual(matcher.exact_files, (("file.txt", ()),))
         self.assertEqual(matcher.exact_dirs, (("cache", ()),))
+
+    def test_configured_marker_patterns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)
+            matcher = self.matcher(excluded_patterns.EXCLUDED_PATTERNS, source=source)
+
+            (source / "Cargo.toml").touch()
+            self.assertTrue(matcher.matches_dir("target"))
+
+            (source / "pyproject.toml").touch()
+            self.assertFalse(matcher.matches_dir(".venv"))
+
+            (source / "uv.lock").touch()
+            self.assertTrue(matcher.matches_dir(".venv"))
 
     def test_marker_must_be_an_exact_basename(self) -> None:
         patterns = (
