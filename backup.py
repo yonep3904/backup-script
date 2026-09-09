@@ -36,6 +36,10 @@ class ExcludeMatcher:
       Glob metacharacters are supported. In path patterns, glob
       metacharacters never match the path separator ``/``.
 
+    - ``marker :: target``:
+      Match ``target`` only when its parent directory contains an entry
+      named ``marker``. The marker must be an exact basename.
+
     Path patterns always use ``/`` as the separator, regardless of the
     operating system.
 
@@ -45,42 +49,55 @@ class ExcludeMatcher:
     Exclusions are monotonic: once a directory is excluded, none of its
     descendants can be included again.
     """
-
     patterns: frozenset[str]
+    source: Path
 
-    exact_files: frozenset[str]
-    exact_dirs: frozenset[str]
-    glob_files: tuple[str, ...]
-    glob_dirs: tuple[str, ...]
+    exact_files: tuple[tuple[str, str | None], ...]
+    exact_dirs: tuple[tuple[str, str | None], ...]
+    glob_files: tuple[tuple[str, str | None], ...]
+    glob_dirs: tuple[tuple[str, str | None], ...]
 
-    exact_file_paths: frozenset[str]
-    exact_dir_paths: frozenset[str]
-    glob_file_paths: tuple[tuple[re.Pattern[str], ...], ...]
-    glob_dir_paths: tuple[tuple[re.Pattern[str], ...], ...]
+    exact_file_paths: tuple[tuple[str, str | None], ...]
+    exact_dir_paths: tuple[tuple[str, str | None], ...]
+    glob_file_paths: tuple[
+        tuple[tuple[re.Pattern[str], ...], str | None],
+        ...,
+    ]
+    glob_dir_paths: tuple[
+        tuple[tuple[re.Pattern[str], ...], str | None],
+        ...,
+    ]
 
     def __init__(
         self,
         patterns: set[str],
+        source: Path,
     ) -> None:
+        if not source.is_absolute():
+            raise ValueError(f"Source must be an absolute path: {source}")
+
         self.patterns = frozenset(patterns)
+        self.source = source
 
-        exact_files: set[str] = set()
-        exact_dirs: set[str] = set()
-        glob_files: list[str] = []
-        glob_dirs: list[str] = []
+        exact_files: list[tuple[str, str | None]] = []
+        exact_dirs: list[tuple[str, str | None]] = []
+        glob_files: list[tuple[str, str | None]] = []
+        glob_dirs: list[tuple[str, str | None]] = []
 
-        exact_file_paths: set[str] = set()
-        exact_dir_paths: set[str] = set()
-        glob_file_paths: list[tuple[re.Pattern[str], ...]] = []
-        glob_dir_paths: list[tuple[re.Pattern[str], ...]] = []
+        exact_file_paths: list[tuple[str, str | None]] = []
+        exact_dir_paths: list[tuple[str, str | None]] = []
+        glob_file_paths: list[tuple[tuple[re.Pattern[str], ...], str | None]] = []
+        glob_dir_paths: list[tuple[tuple[re.Pattern[str], ...], str | None]] = []
 
         for raw_pattern in sorted(patterns):
+            marker, raw_target = self._parse_marker_pattern(raw_pattern)
+
             (
                 pattern,
                 is_dir,
                 is_path,
                 is_glob,
-            ) = self._parse_pattern(raw_pattern)
+            ) = self._parse_pattern(raw_target)
 
             if is_path:
                 if is_glob:
@@ -89,54 +106,106 @@ class ExcludeMatcher:
                         for component in pattern.split("/")
                     )
                     target = glob_dir_paths if is_dir else glob_file_paths
-                    target.append(compiled)
+                    target.append((compiled, marker))
                 else:
                     target = exact_dir_paths if is_dir else exact_file_paths
-                    target.add(pattern)
+                    target.append((pattern, marker))
             else:
                 if is_glob:
                     target = glob_dirs if is_dir else glob_files
-                    target.append(pattern)
+                    target.append((pattern, marker))
                 else:
                     target = exact_dirs if is_dir else exact_files
-                    target.add(pattern)
+                    target.append((pattern, marker))
 
-        self.exact_files = frozenset(exact_files)
-        self.exact_dirs = frozenset(exact_dirs)
+        self.exact_files = tuple(exact_files)
+        self.exact_dirs = tuple(exact_dirs)
         self.glob_files = tuple(glob_files)
         self.glob_dirs = tuple(glob_dirs)
 
-        self.exact_file_paths = frozenset(exact_file_paths)
-        self.exact_dir_paths = frozenset(exact_dir_paths)
+        self.exact_file_paths = tuple(exact_file_paths)
+        self.exact_dir_paths = tuple(exact_dir_paths)
         self.glob_file_paths = tuple(glob_file_paths)
         self.glob_dir_paths = tuple(glob_dir_paths)
 
     def matches_file(self, relative: Path | str) -> bool:
-        relative_string, name = self._normalize_candidate(relative)
+        relative_path, relative_string, name = self._normalize_candidate(relative)
 
-        if name in self.exact_files or relative_string in self.exact_file_paths:
+        if self._matches_exact(name, relative_path, self.exact_files):
             return True
 
-        if any(fnmatch.fnmatchcase(name, pattern) for pattern in self.glob_files):
+        if self._matches_exact(
+            relative_string,
+            relative_path,
+            self.exact_file_paths,
+        ):
             return True
 
-        return self._matches_path_glob(relative_string, self.glob_file_paths)
+        if self._matches_glob(name, relative_path, self.glob_files):
+            return True
+
+        return self._matches_path_glob(
+            relative_string,
+            relative_path,
+            self.glob_file_paths,
+        )
 
     def matches_dir(self, relative: Path | str) -> bool:
-        relative_string, name = self._normalize_candidate(relative)
+        relative_path, relative_string, name = self._normalize_candidate(relative)
 
-        if name in self.exact_dirs or relative_string in self.exact_dir_paths:
+        if self._matches_exact(name, relative_path, self.exact_dirs):
             return True
 
-        if any(fnmatch.fnmatchcase(name, pattern) for pattern in self.glob_dirs):
+        if self._matches_exact(
+            relative_string,
+            relative_path,
+            self.exact_dir_paths,
+        ):
             return True
 
-        return self._matches_path_glob(relative_string, self.glob_dir_paths)
+        if self._matches_glob(name, relative_path, self.glob_dirs):
+            return True
 
-    @staticmethod
+        return self._matches_path_glob(
+            relative_string,
+            relative_path,
+            self.glob_dir_paths,
+        )
+
+    def _matches_exact(
+        self,
+        candidate: str,
+        relative: Path,
+        patterns: tuple[tuple[str, str | None], ...],
+    ) -> bool:
+        return any(
+            candidate == pattern and self._matches_marker(relative, marker)
+            for pattern, marker in patterns
+        )
+
+    def _matches_glob(
+        self,
+        candidate: str,
+        relative: Path,
+        patterns: tuple[tuple[str, str | None], ...],
+    ) -> bool:
+        return any(
+            fnmatch.fnmatchcase(candidate, pattern)
+            and self._matches_marker(relative, marker)
+            for pattern, marker in patterns
+        )
+
+    def _matches_marker(self, relative: Path, marker: str | None) -> bool:
+        return marker is None or (self.source / relative.parent / marker).exists()
+
     def _matches_path_glob(
+        self,
         relative: str,
-        patterns: tuple[tuple[re.Pattern[str], ...], ...],
+        relative_path: Path,
+        patterns: tuple[
+            tuple[tuple[re.Pattern[str], ...], str | None],
+            ...,
+        ],
     ) -> bool:
         components = relative.split("/")
 
@@ -146,13 +215,14 @@ class ExcludeMatcher:
                 component_pattern.fullmatch(component)
                 for component_pattern, component in zip(pattern, components)
             )
-            for pattern in patterns
+            and self._matches_marker(relative_path, marker)
+            for pattern, marker in patterns
         )
 
     @staticmethod
     def _normalize_candidate(
         relative: Path | str,
-    ) -> tuple[str, str]:
+    ) -> tuple[Path, str, str]:
         path = Path(relative)
 
         if path.is_absolute():
@@ -168,7 +238,7 @@ class ExcludeMatcher:
                 f"components: {relative!r}"
             )
 
-        return relative_string, path.name
+        return path, relative_string, path.name
 
     @classmethod
     def _parse_pattern(
@@ -209,6 +279,32 @@ class ExcludeMatcher:
         is_glob = cls._has_glob(pattern)
 
         return pattern, is_dir, is_path, is_glob
+
+    @classmethod
+    def _parse_marker_pattern(cls, raw_pattern: str) -> tuple[str | None, str]:
+        if "::" not in raw_pattern:
+            return None, raw_pattern
+
+        parts = raw_pattern.split("::")
+
+        if len(parts) != 2:
+            raise ValueError(f"Invalid marker exclusion pattern: {raw_pattern!r}")
+
+        marker, target = (part.strip() for part in parts)
+
+        if (
+            not marker
+            or marker in (".", "..")
+            or "/" in marker
+            or "\\" in marker
+            or cls._has_glob(marker)
+        ):
+            raise ValueError(f"Marker must be an exact basename: {marker!r}")
+
+        if not target:
+            raise ValueError(f"Marker target must not be empty: {raw_pattern!r}")
+
+        return marker, target
 
     @staticmethod
     def _has_glob(pattern: str) -> bool:
@@ -486,7 +582,7 @@ def main() -> None:
     print(f"Format : {args.format}")
     print()
 
-    exclude_matcher = ExcludeMatcher(EXCLUDED_PATTERNS)
+    exclude_matcher = ExcludeMatcher(EXCLUDED_PATTERNS, source=source)
 
     # Build the archive in the destination directory and atomically replace
     # the final path only after successful completion.
