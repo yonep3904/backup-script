@@ -10,16 +10,18 @@
 #   and therefore should be backed up.
 #
 # Syntax:
-#   "name/"   matches a directory basename.
-#   "name"    matches a file basename.
+#   "name/"   matches a directory basename anywhere in the source tree.
+#   "name"    matches a file basename anywhere in the source tree.
+#   Patterns containing "/" match a path relative to the source directory.
 #   Glob metacharacters (*, ?, [...]) are supported.
 #
 # Examples:
 #   "node_modules/"  excludes directories named "node_modules".
+#   ".yarn/cache/"    excludes the directory at that relative path.
 #   "*.pyc"          excludes files ending in ".pyc".
 #   "CMakeCache.txt" excludes files named "CMakeCache.txt".
 #
-# Patterns are matched against basenames, not full relative paths.
+# Path separators in patterns must be written as "/" on every platform.
 # ---------------------------------------------------------------------------
 
 
@@ -166,9 +168,6 @@ EXCLUDED_PATTERNS = {
     ".yarn/unplugged/",
     ".yarn/build-state.yml",
     ".yarn/install-state.gz",
-
-    # pnpm's project-local virtual store.
-    "node_modules/.pnpm/",  # Redundant with node_modules/, kept for clarity.
 
     # Common build output names are intentionally preserved because they are
     # too generic.
