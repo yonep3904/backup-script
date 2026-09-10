@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Literal
 
-from .excluded_patterns import EXCLUDED_PATTERNS
+from excluded_patterns import EXCLUDED_PATTERNS
 
 
 class ExcludeMatcher:
