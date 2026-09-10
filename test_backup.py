@@ -106,7 +106,7 @@ class ExcludeMatcherTest(unittest.TestCase):
                 (source / "crate").mkdir()
                 (source / "crate" / "Cargo.toml").touch()
                 matcher = self.matcher(
-                    {"Cargo.toml :: target/"},
+                    {"target/ :: Cargo.toml"},
                     source=source,
                 )
 
@@ -119,7 +119,7 @@ class ExcludeMatcherTest(unittest.TestCase):
                 source = Path(temp)
                 (source / "pyproject.toml").touch()
                 matcher = self.matcher(
-                    {"pyproject.toml :: .venv/"},
+                    {".venv/ :: pyproject.toml"},
                     source=source,
                 )
 
@@ -132,7 +132,7 @@ class ExcludeMatcherTest(unittest.TestCase):
             (source / "projects" / "app").mkdir(parents=True)
             (source / "projects" / "app" / "pyproject.toml").touch()
             matcher = self.matcher(
-                {"pyproject.toml :: projects/*/.venv/"},
+                {"projects/*/.venv/ :: pyproject.toml"},
                 source=source,
             )
 
@@ -143,7 +143,7 @@ class ExcludeMatcherTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             source = Path(temp)
             matcher = self.matcher(
-                {"pyproject.toml + uv.lock :: .venv/"},
+                {".venv/ :: pyproject.toml + uv.lock"},
                 source=source,
             )
 
@@ -177,15 +177,15 @@ class ExcludeMatcherTest(unittest.TestCase):
 
     def test_marker_must_be_an_exact_basename(self) -> None:
         patterns = (
-            "*.toml :: target/",
-            "config/Cargo.toml :: target/",
-            r"config\Cargo.toml :: target/",
-            ". :: target/",
-            "Cargo.toml ::",
-            "Cargo.toml :: marker :: target/",
-            "+ uv.lock :: .venv/",
-            "pyproject.toml + :: .venv/",
-            "pyproject.toml ++ uv.lock :: .venv/",
+            "target/ :: *.toml",
+            "target/ :: config/Cargo.toml",
+            r"target/ :: config\Cargo.toml",
+            "target/ :: .",
+            "target/ ::",
+            "target/ :: marker :: Cargo.toml",
+            ".venv/ :: + uv.lock",
+            ".venv/ :: pyproject.toml +",
+            ".venv/ :: pyproject.toml ++ uv.lock",
         )
 
         for pattern in patterns:

@@ -36,7 +36,7 @@ class ExcludeMatcher:
       Glob metacharacters are supported. In path patterns, glob
       metacharacters never match the path separator ``/``.
 
-    - ``marker [+ marker ...] :: target``:
+    - ``target :: marker [+ marker ...]``:
       Match ``target`` only when its parent directory contains entries for
       all specified markers. Each marker must be an exact basename.
 
@@ -91,7 +91,7 @@ class ExcludeMatcher:
         glob_dir_paths: list[tuple[tuple[re.Pattern[str], ...], tuple[str, ...]]] = []
 
         for raw_pattern in sorted(patterns):
-            marker, raw_target = self._parse_marker_pattern(raw_pattern)
+            markers, raw_target = self._parse_marker_pattern(raw_pattern)
 
             (
                 pattern,
@@ -107,17 +107,17 @@ class ExcludeMatcher:
                         for component in pattern.split("/")
                     )
                     target = glob_dir_paths if is_dir else glob_file_paths
-                    target.append((compiled, marker))
+                    target.append((compiled, markers))
                 else:
                     target = exact_dir_paths if is_dir else exact_file_paths
-                    target.append((pattern, marker))
+                    target.append((pattern, markers))
             else:
                 if is_glob:
                     target = glob_dirs if is_dir else glob_files
-                    target.append((pattern, marker))
+                    target.append((pattern, markers))
                 else:
                     target = exact_dirs if is_dir else exact_files
-                    target.append((pattern, marker))
+                    target.append((pattern, markers))
 
         self.exact_files = tuple(exact_files)
         self.exact_dirs = tuple(exact_dirs)
@@ -180,8 +180,8 @@ class ExcludeMatcher:
         patterns: tuple[tuple[str, tuple[str, ...]], ...],
     ) -> bool:
         return any(
-            candidate == pattern and self._matches_marker(relative, marker)
-            for pattern, marker in patterns
+            candidate == pattern and self._matches_marker(relative, markers)
+            for pattern, markers in patterns
         )
 
     def _matches_glob(
@@ -192,8 +192,8 @@ class ExcludeMatcher:
     ) -> bool:
         return any(
             fnmatch.fnmatchcase(candidate, pattern)
-            and self._matches_marker(relative, marker)
-            for pattern, marker in patterns
+            and self._matches_marker(relative, markers)
+            for pattern, markers in patterns
         )
 
     def _matches_path_glob(
@@ -213,8 +213,8 @@ class ExcludeMatcher:
                 component_pattern.fullmatch(component)
                 for component_pattern, component in zip(pattern, components)
             )
-            and self._matches_marker(relative_path, marker)
-            for pattern, marker in patterns
+            and self._matches_marker(relative_path, markers)
+            for pattern, markers in patterns
         )
 
     def _matches_marker(self, relative: Path, markers: tuple[str, ...]) -> bool:
@@ -292,7 +292,7 @@ class ExcludeMatcher:
         if len(parts) != 2:
             raise ValueError(f"Invalid marker exclusion pattern: {raw_pattern!r}")
 
-        raw_markers, target = (part.strip() for part in parts)
+        target, raw_markers = (part.strip() for part in parts)
         markers = tuple(marker.strip() for marker in raw_markers.split("+"))
 
         for marker in markers:
